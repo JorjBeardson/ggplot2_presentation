@@ -1,0 +1,392 @@
+---
+title: "Grammar of Graphics"
+subtitle: "ggplot2"
+author: "George Fullegar"
+date: "17 May 2017"
+output: 
+  ioslides_presentation:
+    widescreen: true
+    smaller: true
+    incremental: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+require(ggplot2)
+require(scales)
+require(rvest)
+require(stringr)
+require(car)
+require(data.table)
+require(dtplyr)
+require(dplyr)
+require(rgeos)
+require(maptools)
+require(rgdal)
+require(gdata)
+require(knitr)
+require(grid)
+require(gdata)
+
+theme_set(theme_minimal())
+
+
+## Convenience "not in" function
+"%nin%" <- function(x, y) {
+  return( !(x %in% y) )
+}
+
+##' Footnote a plot.
+##' @title makeFootnote
+##' @param footnoteText Defaults to date stamp.
+##' @param size size
+##' @param colour colour
+##' @return plot footnote
+##' @author Kieran Healy
+##' @export
+makeFootnote <- function(footnoteText=
+                           format(Sys.time(), "%d %b %Y"),
+                         size= .7, colour= grey(.5))
+{
+
+  pushViewport(viewport())
+  grid.text(label= footnoteText ,
+            x = unit(1,"npc") - unit(2, "mm"),
+            y= unit(2, "mm"),
+            just=c("right", "bottom"),
+            gp=gpar(cex= size, col=colour))
+  popViewport()
+}
+
+
+### Plot a credit line
+##' Credit a plot
+##' @title credit
+##' @param credit.text Who gets the credit. Defaults to my name
+##homepage URL.
+##' @return credit
+##' @author Kieran Healy
+##' @export
+##' @param credit.text Text of the credit line
+##' @param ...  Other arguments to makeFootnote
+credit <- function(credit.text="Kieran Healy, http://kieranhealy.org\n", ...) {
+  return(makeFootnote(credit.text, ...))
+}
+
+
+## credit() and makeFootnote() functions can be found here:
+## https://github.com/kjhealy/kjhutils/blob/master/R/utility.R
+
+
+
+
+data <- fread("data\\uk-election-results-2015.csv")
+
+#
+data <- data %>% 
+          group_by(Constituency) %>% 
+          mutate(Total.Votes.Cast=sum(Votes), Rank=row_number(desc(Votes)))
+
+data$Party[data$Candidate == "John Bercow"] <- "Conservative"
+## Code the Speaker of the House as Conservative
+
+data$Party <- as.factor(data$Party)
+##  data$Party <- reorder.factor(data$Party, new.order=by.seats$Party)
+
+
+by.gb.mps <- data %>% group_by(Constituency) %>%
+  filter(Votes==max(Votes) & Region!="Northern Ireland" )  %>%
+  ungroup() %>% arrange(desc(Vote.Share))  %>% data.table(.)
+
+by.seats <- data %>% group_by(Constituency) %>% filter(Votes==max(Votes)) %>%
+  group_by(Party) %>% tally() %>% arrange(desc(n)) %>%
+  data.table(.)
+
+all.parties <- data %>% group_by(Party.all) %>% tally() %>% arrange(desc(n)) %>% data.table()
+
+by.mps <- data %>% group_by(Constituency) %>% filter(Votes==max(Votes))  %>%
+  ungroup() %>% arrange(desc(Vote.Share)) %>% data.table(.)
+by.mps$Party <- factor(by.mps$Party)
+
+pal <- function(col, border = "light gray")
+{
+  n <- length(col)
+  plot(0, 0, type="n", xlim = c(0, 1), ylim = c(0, 1), axes=FALSE, xlab = "", ylab = "")
+  rect(0:(n-1)/n, 0, 1:n/n, 1, col = col, border = border)
+}
+
+
+uk.colours <- data.table(Party=levels(by.mps$Party),
+                        party.colour=c(
+                          "#1577C7", # Conservative
+                          "#BC1D40", # DUP
+                          "#7EC031", # Greens
+                          "#999999", # Independent
+                          "#E8251F", # Labour
+                          "#FA8324", # Lim-Dems
+ ##                         "#000000", # Other
+                          "#559D37", # Plaid Cymru
+                          "#EAC135", # SNP
+                          "#126140", # Sinn Fein
+                          "#6AA769", # SDLP
+                          "#6E3485", # UKIP
+                          "#233160" # UUP
+                        ),
+                        stringsAsFactors = FALSE)
+
+
+pal(uk.colours$party.colour)
+
+not.gb <- c("Democratic Unionist Party", "Sinn Fein", "Social Democratic & Labour Party",
+            "Ulster Unionist Party")
+gb.colours <- uk.colours %>% filter(Party %nin% not.gb)
+
+pc.look <- function(parties){
+    x <- match(parties, uk.colours$Party)
+    colours <- uk.colours$party.colour[x]
+    return(colours)
+}
+
+    constituency_names.df <- fread("data/constituency_names.csv", header=TRUE, stringsAsFactors=FALSE)
+
+    
+```
+
+## ggplot2{.build}
+
+Grammar of graphics
+
+- **data**
+- **aes**thetic mappings
+- **geom**etric objects
+- **scale**s
+- **facet**s
+- *stat*s
+- *coord*inate system
+
+
+## Look at the data {.build}
+```{r echo = TRUE}
+str(by.mps)
+```
+
+## Quick bar chart
+```{r echo = TRUE}
+p2 <- qplot(Party,data = by.mps,geom="bar")
+p2
+```
+
+## Tidy up
+can't read the labels, so
+```{r echo = TRUE}
+p2 <- qplot(Party,data = by.mps,geom="bar")
+p2 <- p2 + theme(axis.text.x = element_text(angle = 30, hjust = 1))
+p2 <- p2 + labs(x="Winning Party", y="Number of Seats")
+```
+
+## Tidy up
+```{r echo = FALSE}
+p2 
+```
+
+
+## Basic Scatter Plot {.build}
+
+```{r echo = TRUE}
+p <- ggplot(by.mps, aes(x=Total.Votes.Cast, y=Vote.Share))
+p <- p + geom_point() 
+p
+```
+
+## Add Colour Formatting {.build}
+
+```{r echo = TRUE}
+p <- ggplot(by.mps, aes(x=Total.Votes.Cast, y=Vote.Share, colour=Party))
+p <- p + geom_point() 
+p
+```
+
+## Assign Party Colours to Data {.build}
+
+```{r uk.colours, echo = TRUE}
+uk.colours
+```
+
+## Assign Party Colours to Data {.build}
+
+```{r echo = TRUE}
+p <- p + scale_colour_manual(values=uk.colours$party.colour)
+p
+```
+
+## Add a facet {.build}
+
+```{r echo = TRUE}
+p <- p + facet_grid(.~Region)
+p <- p + labs(x="Votes Cast in Constituency",
+            y="Vote Share of Winner", colour="Winner's Party")
+
+```
+## Add a facet {.build}
+
+```{r echo = FALSE}
+p <- ggplot(by.mps, aes(x=Total.Votes.Cast, y=Vote.Share, colour=Party))
+p <- p + geom_point() 
+p <- p + scale_colour_manual(values=uk.colours$party.colour)
+p <- p + facet_grid(.~Region)
+p <- p + labs(x="Votes Cast in Constituency",
+            y="Vote Share of Winner", colour="Winner's Party")
+p
+```
+
+## Put it all together and tidy up the axis {.build}
+
+```{r echo = TRUE}
+p <- ggplot(by.mps, aes(x=Total.Votes.Cast/1000, y=Vote.Share/100, colour=Party))
+p <- p + geom_point() 
+p <- p + scale_colour_manual(values=uk.colours$party.colour)
+p <- p + facet_grid(.~Region)
+p <- p + labs(x="Votes Cast in Constituency (Thousands)")
+p <- p + labs(y="Vote Share of Winner", colour="Winner's Party")
+p <- p + scale_x_continuous(labels=comma)
+p <- p + scale_y_continuous(labels=percent)
+
+```
+## Put it all together and tidy up the axis {.build}
+
+```{r echo = FALSE}
+p <- ggplot(by.mps, aes(x=Total.Votes.Cast/1000, y=Vote.Share/100, colour=Party))
+p <- p + geom_point() 
+p <- p + scale_colour_manual(values=uk.colours$party.colour)
+p <- p + facet_grid(.~Region)
+p <- p + labs(x="Votes Cast in Constituency (Thousands)")
+p <- p + labs(y="Vote Share of Winner", colour="Winner's Party")
+p <- p + scale_x_continuous(labels=comma)
+p <- p + scale_y_continuous(labels=percent)
+p
+```
+
+
+## Put it all together and tidy up the axis {.build}
+replacing
+
+```{r echo = TRUE}
+p <- p + facet_grid(.~Region)
+```
+
+with
+
+```{r echo = TRUE}
+p <- p + facet_grid(Region~.)
+```
+
+produces:
+
+## Put it all together and tidy up the axis {.build}
+```{r echo = FALSE}
+
+p <- ggplot(by.mps, aes(x=Total.Votes.Cast/1000, y=Vote.Share/100, colour=Party))
+p <- p + geom_point() 
+p <- p + scale_colour_manual(values=uk.colours$party.colour)
+p <- p + facet_grid(Region~.)
+p <- p + labs(x="Votes Cast in Constituency (Thousands)")
+p <- p + labs(y="Vote Share of Winner", colour="Winner's Party")
+p <- p + scale_x_continuous(labels=comma)
+p <- p + scale_y_continuous(labels=percent)
+p
+```
+
+
+##	A few examples
+```{r echo = TRUE}
+p <- ggplot(by.mps, aes(x=Total.Votes.Cast, y=Vote.Share/100, colour=Party))
+p <- p +  geom_point() + scale_colour_manual(values=uk.colours$party.colour) +
+        scale_x_continuous(labels=comma) + scale_y_continuous(labels=percent)
+p
+```
+
+##	A few examples
+
+```{r echo = TRUE}
+safest.seats <- by.mps %>% filter(Vote.Share>63) %>% select(Constituency, Vote.Share, Party) %>%
+    data.table()
+
+p <- ggplot(safest.seats, aes(x=reorder(as.character(Constituency), Vote.Share, order=TRUE),
+                              y=Vote.Share,
+                              colour=Party))
+p <- p + geom_point(size=3) + coord_flip() + scale_colour_manual(values=
+		pc.look(c("Conservative", "Labour", "Other"))) + labs(x="", y="Winning Candidate's Vote Share") + 
+		ggtitle("Safest Seats") + theme(legend.position="top")
+```
+
+##	A few examples
+
+```{r echo = FALSE}
+p
+```
+
+##  A few examples
+
+```{r echo = FALSE}
+
+uk.map <- readOGR("maps/topo_wpc.json", "wpc",verbose = FALSE)
+## The name field didn't get imported properly for some reason.
+ind <- match(uk.map@data$id, constituency_names.df$id)
+uk.map@data$name <- constituency_names.df$Constituency[ind]
+
+constituencies.map <- data.frame(id=0:(length(uk.map@data$name)-1),
+                       Constituency=as.character(uk.map@data$name))
+
+uk.map.df <- fortify(uk.map)
+
+uk.map.df <- merge(uk.map.df, constituencies.map, by="id")
+
+## Now we have a map of all the constituencys and winners
+uk.map.df <- merge(uk.map.df, by.mps, by="Constituency")
+
+uk.map.df$Party <- as.factor(uk.map.df$Party)
+
+uk.map.df$Party <- droplevels(uk.map.df$Party)
+
+uk.map.df$Party <- reorder.factor(uk.map.df$Party,new.order=as.character(by.seats$Party), order=TRUE)
+
+
+```
+
+```{r echo = TRUE}
+### Make the maps
+p <- ggplot(data=uk.map.df, aes(x=long, y=lat, group=group))
+
+p <- p + geom_map(data = uk.map.df, map = uk.map.df,
+                   aes(map_id=id, group=group, fill=Party),
+                   colour="white", size=0.2)
+
+p <- p + geom_map(data=subset(uk.map.df, Constituency=="York Central"),
+                    map=subset(uk.map.df, Constituency=="York Central"),
+                    aes(map_id=id, group=group, fill=Party),
+                    colour="white", size=0.2)
+
+
+p <- p + coord_map(projection="albers", at0 = 51, lat1 = 0) + labs(x=NULL, y=NULL, fill="") +
+    theme(panel.grid=element_blank(),
+          axis.ticks=element_blank(),
+          panel.border=element_blank(),
+          axis.text=element_blank())
+
+p <- p + scale_fill_manual(values=gb.colours$party.colour,limits=gb.colours$Party)
+
+```
+
+##  A few examples
+
+```{r echo = FALSE}
+p
+
+```
+
+
+## Credits {.build}
+
+The code to source the data is heavily based on the work done for [this blogpost](https://www.r-bloggers.com/who-came-second-in-the-uk-election/ "Who Came Second in the UK Election? Kieran Healy") by Kieran Healy. The data is available on [their github (https://github.com/kjhealy/)](https://github.com/kjhealy/uk-elections/tree/master/data).
+
+The full presentation is available on [my githhub (https://github.com/JorjBeardson)](https://github.com/JorjBeardson)
